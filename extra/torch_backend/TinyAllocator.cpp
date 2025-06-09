@@ -4,6 +4,10 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/SafePyObject.h>
+#include <torch/torch.h>
+#include <c10/core/TensorOptions.h>
+#include <torch/extension.h>
+#include <torch/library.h>
 
 // register guard
 namespace at {
@@ -24,15 +28,15 @@ namespace c10 {
     TinyAllocator() = default;
 
     static void deleter(void* ptr) {
-        free(ptr);
+      delete static_cast<std::shared_ptr<c10::SafePyObject>*>(ptr);
     }
 
     DeleterFnPtr raw_deleter() const override {
-      return deleter;
+      return &deleter;
     }
 
     at::DataPtr allocate(size_t nbytes) override {
-      void *data = malloc(sizeof(std::shared_ptr<c10::SafePyObject>));
+      void *data = new std::shared_ptr<c10::SafePyObject>();
       // Check which constructor to use,
       return {data, data, &deleter, Device(kPrivateUse1)};
     }
@@ -47,8 +51,8 @@ namespace c10 {
   REGISTER_ALLOCATOR(kPrivateUse1, &g_tiny_alloc)
 }
 
-void link_to_tiny_tensor(const at::Tensor &pt_tensor, py::object &tiny_tensor) {
-  // TODO: we have to get the dtype
+// at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index)
+at::Tensor wrap_tensor(py::object &tiny_tensor, c10::ScalarType dtype, c10::DeviceIndex device_index)  {
   std::vector<int64_t> sizes = tiny_tensor.attr("shape").cast<std::vector<int64_t>>();
 
   py::list views = tiny_tensor.attr("lazydata").attr("st").attr("views");
@@ -58,15 +62,41 @@ void link_to_tiny_tensor(const at::Tensor &pt_tensor, py::object &tiny_tensor) {
     storage_offset += v.attr("offset").cast<int64_t>(); // TODO: is this correct?
   }
 
-  auto* impl = pt_tensor.unsafeGetTensorImpl();
-  impl->set_sizes_and_strides(sizes, strides);
-  impl->set_storage_offset(storage_offset);
+ // Create storage with the correct size in bytes
+  auto storage = c10::Storage(
+    c10::Storage::use_byte_size_t(),
+    4,  // total size in bytes
+    c10::GetAllocator(at::kPrivateUse1),
+    false
+  );
+
+  at::Tensor pt_tensor = at::detail::make_tensor<at::TensorImpl>(
+      std::move(storage),
+      at::DispatchKeySet(at::DispatchKey::PrivateUse1),
+      c10::scalarTypeToTypeMeta(dtype)
+  );
+
+  pt_tensor.data();
+  // auto* impl = pt_tensor.unsafeGetTensorImpl();
+  // impl->set_sizes_and_strides(sizes, strides);
+  // impl->set_storage_offset(storage_offset);
  
-  auto* data = pt_tensor.data_ptr();
-  data = std::make_shared<c10::SafePyObject>(tiny_tensor.release().ptr(), getPyInterpreter());
+  void* data = pt_tensor.data_ptr();
+  auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
+  *pyobj_ptr = std::make_shared<c10::SafePyObject>(tiny_tensor.release().ptr(), getPyInterpreter());
+  
+  return pt_tensor;
 }
 
+py::object unwrap_tensor(const at::Tensor &tensor) {
+  auto* data = tensor.data_ptr();
+  auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
+  PyObject* raw = pyobj_ptr->get()->ptr(getPyInterpreter());
+  Py_INCREF(raw);  // Ensure lifetime is correct
+  return py::reinterpret_borrow<py::object>(raw);
+}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("link_to_tiny_tensor", &link_to_tiny_tensor);
+  m.def("wrap", &wrap_tensor);
+  m.def("unwrap", &unwrap_tensor);
 }

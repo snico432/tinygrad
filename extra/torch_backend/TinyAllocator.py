@@ -1,4 +1,5 @@
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes, Device
+from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 import torch, contextlib, pathlib
 from torch.utils._python_dispatch import TorchDispatchMode
 from tinygrad.dtype import _from_torch_dtype
@@ -7,23 +8,19 @@ from tinygrad.dtype import _from_torch_dtype
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "TinyAllocator.cpp")])
 
+def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
+def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
+
+def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
+def unwrap(x:torch.Tensor) -> Tensor:
+  assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
+  return mod.unwrap(x)
+
 def link_tensors(x: torch.Tensor, y: Tensor):
   return mod.link_to_tiny_tensor(x, y)
 
 def empty_memory_format(size, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None):
   return TTensor(Tensor.empty(*size, dtype=_from_torch_dtype(dtype)))
-
-# NOTE: if we have a way to change wrap/unwrap, these can be the same methods from backend.py
-tiny_backend = {
-  "aten.empty.memory_format": empty_memory_format,
-  "aten.view.default": lambda x,sz: TTensor(x.tiny.reshape(sz)),
-  "aten.abs.default": lambda x: TTensor(x.tiny.abs()),
-  "aten.eq.Tensor": lambda x,y: TTensor(x.tiny == y.tiny),
-  "aten.bitwise_and.Tensor": lambda x,y: TTensor(x.tiny & y.tiny),
-  "aten.ne.Scalar": lambda x,y: TTensor(x.tiny != y),
-  "aten.mul.Tensor": lambda x,y: TTensor(x.tiny * y.tiny),
-  "aten.masked_select.default": lambda x,y: TTensor(Tensor(x.tiny.numpy()[y.tiny.numpy()])),
-}
 
 class TTensor(torch.Tensor):
   tiny: Tensor
@@ -32,7 +29,6 @@ class TTensor(torch.Tensor):
   @staticmethod
   def __new__(cls, tiny, *args, **kwargs):
     out = torch.Tensor._make_wrapper_subclass(cls, tiny.shape)
-    # torch._C._set_throw_on_mutable_data_ptr(out)
     out.tiny = tiny
     link_tensors(out, out.tiny)
     return out
@@ -46,6 +42,22 @@ class TTensor(torch.Tensor):
 
 class Dispatcher(TorchDispatchMode): __torch_dispatch__ = TTensor.__torch_dispatch__
 Dispatcher().__enter__()
+  
+
+# NOTE: if we have a way to change wrap/unwrap, these can be the same methods from backend.py
+tiny_backend = {
+  "aten.empty.memory_format": empty_memory_format,
+  "aten.view.default": lambda x,sz: TTensor(x.tiny.reshape(sz)),
+  "aten.abs.default": lambda x: TTensor(x.tiny.abs()),
+  "aten.eq.Tensor": lambda x,y: TTensor(x.tiny == y.tiny),
+  "aten.bitwise_and.Tensor": lambda x,y: TTensor(x.tiny & y.tiny),
+  "aten.ne.Scalar": lambda x,y: TTensor(x.tiny != y),
+  "aten.mul.Tensor": lambda x,y: TTensor(x.tiny * y.tiny),
+  "aten.masked_select.default": lambda x,y: TTensor(Tensor(x.tiny.numpy()[y.tiny.numpy()])),
+  "aten.detach.default": lambda x: TTensor(x.tiny.detach()),
+}
 
 if __name__ == "__main__":
-  a = torch.empty((4,), dtype=torch.int)
+  x = wrap(Tensor.ones(5))
+  print(x)
+#   a = torch.empty((4,), dtype=torch.int)
