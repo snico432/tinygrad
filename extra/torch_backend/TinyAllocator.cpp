@@ -109,7 +109,8 @@ namespace c10 {
     TinyAllocator() = default;
 
     static void deleter(void* ptr) {
-      free(ptr);
+      auto* shared_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(ptr);
+      delete shared_ptr;
     }
 
     DeleterFnPtr raw_deleter() const override {
@@ -117,8 +118,8 @@ namespace c10 {
     }
 
     at::DataPtr allocate(size_t nbytes) override {
-      void *data = malloc(sizeof(std::shared_ptr<c10::SafePyObject>));
-      return {data, data, &deleter, Device(kPrivateUse1)};
+      auto* ptr = new std::shared_ptr<c10::SafePyObject>();
+      return {ptr, ptr, &deleter, Device(kPrivateUse1)};
     }
 
     void copy_data(void* dest, const void* src, std::size_t count) const override {
@@ -131,7 +132,6 @@ namespace c10 {
   REGISTER_ALLOCATOR(kPrivateUse1, &g_tiny_alloc)
 }
 
-// at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index)
 at::Tensor wrap_tensor(py::object &tiny_tensor, c10::ScalarType dtype, c10::DeviceIndex device_index)  {
   std::vector<int64_t> sizes = tiny_tensor.attr("shape").cast<std::vector<int64_t>>();
 
@@ -142,12 +142,10 @@ at::Tensor wrap_tensor(py::object &tiny_tensor, c10::ScalarType dtype, c10::Devi
     storage_offset += v.attr("offset").cast<int64_t>(); // TODO: is this correct?
   }
 
- // Create storage with the correct size in bytes
   auto storage = c10::Storage(
     c10::Storage::use_byte_size_t(),
-    0, // arbitrary value for nbytes as we dont use the value in allocator
-    c10::GetAllocator(at::kPrivateUse1),
-    false
+    0, // arbitrary value as we dont use nbytes in allocator
+    c10::GetAllocator(at::kPrivateUse1)
   );
 
   at::Tensor pt_tensor = at::detail::make_tensor<at::TensorImpl>(
@@ -159,10 +157,10 @@ at::Tensor wrap_tensor(py::object &tiny_tensor, c10::ScalarType dtype, c10::Devi
   auto* impl = pt_tensor.unsafeGetTensorImpl();
   impl->set_sizes_and_strides(sizes, strides);
   impl->set_storage_offset(storage_offset);
-  auto* data = impl->unsafe_storage().mutable_data();
-  auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
-  *pyobj_ptr = std::make_shared<c10::SafePyObject>(tiny_tensor.release().ptr(), getPyInterpreter());
-  
+
+  auto tiny_tensor_shared = std::make_shared<c10::SafePyObject>(tiny_tensor.release().ptr(), getPyInterpreter());
+  auto* data = static_cast<std::shared_ptr<c10::SafePyObject>*>(impl->unsafe_storage().mutable_data());
+  *data = tiny_tensor_shared;
   
   return pt_tensor;
 }
@@ -173,15 +171,6 @@ py::object unwrap_tensor(const at::Tensor &pt_tensor) {
   auto* tiny_tensor = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
   return py::reinterpret_borrow<py::object>(tiny_tensor->get()->ptr(getPyInterpreter()));
 }
-
-// py::object unwrap_tensor(const at::Tensor &pt_tensor) {
-//   auto* impl = pt_tensor.unsafeGetTensorImpl();
-//   auto* data = impl->unsafe_storage().mutable_data();
-//   auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
-//   PyObject* raw = pyobj_ptr->get()->ptr(getPyInterpreter());
-//   Py_INCREF(raw);  // Ensure lifetime is correct
-//   return py::reinterpret_borrow<py::object>(raw);
-// }
 
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   // NOTE: no idea what this is
