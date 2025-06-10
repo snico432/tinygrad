@@ -638,4 +638,8 @@ torch.optim.Optimizer.__init__ = _optimizer_patched_init
 
 if __name__ == "__main__":
   x = Tensor([1,2,3])
-  print(wrap(x))
+  print(f"Initial Tiny Tensor {x}")
+  y = wrap(x)
+  print(f"Wrapped Tiny Tensor {y}")
+  z = unwrap(y)
+  print(f"Unwrapped Tiny Tensor {z}")

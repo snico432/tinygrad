@@ -28,7 +28,7 @@ namespace c10 {
     TinyAllocator() = default;
 
     static void deleter(void* ptr) {
-      delete static_cast<std::shared_ptr<c10::SafePyObject>*>(ptr);
+      free(ptr);
     }
 
     DeleterFnPtr raw_deleter() const override {
@@ -36,8 +36,9 @@ namespace c10 {
     }
 
     at::DataPtr allocate(size_t nbytes) override {
-      void *data = new std::shared_ptr<c10::SafePyObject>();
+      void *data = malloc(sizeof(std::shared_ptr<c10::SafePyObject>));
       // Check which constructor to use,
+      std::cout << "Allocated memory at " << data  << std::endl;
       return {data, data, &deleter, Device(kPrivateUse1)};
     }
 
@@ -65,7 +66,7 @@ at::Tensor wrap_tensor(py::object &tiny_tensor, c10::ScalarType dtype, c10::Devi
  // Create storage with the correct size in bytes
   auto storage = c10::Storage(
     c10::Storage::use_byte_size_t(),
-    4,  // total size in bytes
+    0, // arbitrary value for nbytes as we dont use the value in allocator
     c10::GetAllocator(at::kPrivateUse1),
     false
   );
@@ -76,25 +77,38 @@ at::Tensor wrap_tensor(py::object &tiny_tensor, c10::ScalarType dtype, c10::Devi
       c10::scalarTypeToTypeMeta(dtype)
   );
 
-  pt_tensor.data();
-  // auto* impl = pt_tensor.unsafeGetTensorImpl();
-  // impl->set_sizes_and_strides(sizes, strides);
-  // impl->set_storage_offset(storage_offset);
- 
-  void* data = pt_tensor.data_ptr();
+  auto* impl = pt_tensor.unsafeGetTensorImpl();
+  impl->set_sizes_and_strides(sizes, strides);
+  impl->set_storage_offset(storage_offset);
+  auto* data = impl->unsafe_storage().mutable_data();
+  std::cout << "Data pointer: " << data << std::endl;
   auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
   *pyobj_ptr = std::make_shared<c10::SafePyObject>(tiny_tensor.release().ptr(), getPyInterpreter());
+  
   
   return pt_tensor;
 }
 
-py::object unwrap_tensor(const at::Tensor &tensor) {
-  auto* data = tensor.data_ptr();
-  auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
-  PyObject* raw = pyobj_ptr->get()->ptr(getPyInterpreter());
-  Py_INCREF(raw);  // Ensure lifetime is correct
-  return py::reinterpret_borrow<py::object>(raw);
+py::object unwrap_tensor(const at::Tensor &pt_tensor) {
+  auto* impl = pt_tensor.unsafeGetTensorImpl();
+  auto* data = impl->unsafe_storage().mutable_data();
+  auto* tiny_tensor = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
+  return py::reinterpret_borrow<py::object>(tiny_tensor->get()->ptr(getPyInterpreter()));
 }
+
+// py::object unwrap_tensor(const at::Tensor &pt_tensor) {
+//   auto* impl = pt_tensor.unsafeGetTensorImpl();
+//   auto* data = impl->unsafe_storage().mutable_data();
+
+
+
+
+
+//   auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
+//   PyObject* raw = pyobj_ptr->get()->ptr(getPyInterpreter());
+//   Py_INCREF(raw);  // Ensure lifetime is correct
+//   return py::reinterpret_borrow<py::object>(raw);
+// }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
