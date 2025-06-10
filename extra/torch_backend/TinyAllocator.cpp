@@ -10,11 +10,92 @@
 #include <torch/library.h>
 
 // register guard
+// namespace at {
+// namespace detail {
+// //C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
+// // NOTE: pytorch's no-op class throws error on backwards with events/streams
+// // TODO: why are there events in autograd?
+// struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
+// {
+//   static const DeviceType D = DeviceType::PrivateUse1;
+//   CustomNoOpDeviceGuardImpl() = default;
+//   DeviceType type() const override {
+//     return D;
+//   }
+//   Device exchangeDevice(Device) const override {
+//     return Device(D, 0); // no-op
+//   }
+//   Device getDevice() const override {
+//     return Device(D, 0);
+//   }
+//   void setDevice(Device) const override {
+//     // no-op
+//   }
+//   void uncheckedSetDevice(Device) const noexcept override {
+//     // no-op
+//   }
+//   Stream getStream(Device) const noexcept override {
+//     // no-op
+//     return Stream(Stream::DEFAULT, Device(D, 0));
+//   }
+//   Stream getDefaultStream(Device) const override {
+//     // no-op
+//     return Stream(Stream::DEFAULT, Device(D, 0));
+//   }
+//   Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
+//       const override {
+//     // no-op
+//     (void)isHighPriority;
+//     return Stream(Stream::DEFAULT, Device(D, 0));
+//   }
+//   Stream getNewStream(Device, int priority = 0) const override {
+//     // no-op
+//     (void)priority;
+//     return Stream(Stream::DEFAULT, Device(D, 0));
+//   }
+//   // NB: These do NOT set the current device
+//   Stream exchangeStream(Stream) const noexcept override {
+//     // no-op
+//     return Stream(Stream::DEFAULT, Device(D, 0));
+//   }
+//   DeviceIndex deviceCount() const noexcept override {
+//     return 1;
+//   }
+//   // Event-related functions
+//   void record(
+//       void** /*event*/,
+//       const Stream& /*stream*/,
+//       const DeviceIndex /*device_index*/,
+//       const EventFlag /*flag*/) const override {
+//     //TORCH_CHECK(false, D, " backend doesn't support events.");
+//   }
+//   void block(void* /*event*/, const Stream& /*stream*/) const override {
+//     //TORCH_CHECK(false, D, " backend doesn't support events.")
+//   }
+//   bool queryEvent(void* /*event*/) const override {
+//     //TORCH_CHECK(false, D, " backend doesn't support events.")
+//     return true;
+//   }
+//   void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
+//       const noexcept override {}
+//   // Stream-related functions
+//   bool queryStream(const Stream& /*stream*/) const override {
+//     return true;
+//   }
+//   void synchronizeStream(const Stream& /*stream*/) const override {
+//     // Don't wait for anything.
+//   }
+// };
+// C10_REGISTER_GUARD_IMPL(PrivateUse1, CustomNoOpDeviceGuardImpl);
+// }
+// }
+
 namespace at {
   namespace detail {
     C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::PrivateUse1>);
   }
 };
+
 
 // Associate the DataPtr with the data from a Tinygrad Tensor
 // Read up on where and how the Allocator is actually called when
@@ -37,8 +118,6 @@ namespace c10 {
 
     at::DataPtr allocate(size_t nbytes) override {
       void *data = malloc(sizeof(std::shared_ptr<c10::SafePyObject>));
-      // Check which constructor to use,
-      std::cout << "Allocated memory at " << data  << std::endl;
       return {data, data, &deleter, Device(kPrivateUse1)};
     }
 
@@ -81,7 +160,6 @@ at::Tensor wrap_tensor(py::object &tiny_tensor, c10::ScalarType dtype, c10::Devi
   impl->set_sizes_and_strides(sizes, strides);
   impl->set_storage_offset(storage_offset);
   auto* data = impl->unsafe_storage().mutable_data();
-  std::cout << "Data pointer: " << data << std::endl;
   auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
   *pyobj_ptr = std::make_shared<c10::SafePyObject>(tiny_tensor.release().ptr(), getPyInterpreter());
   
@@ -99,16 +177,22 @@ py::object unwrap_tensor(const at::Tensor &pt_tensor) {
 // py::object unwrap_tensor(const at::Tensor &pt_tensor) {
 //   auto* impl = pt_tensor.unsafeGetTensorImpl();
 //   auto* data = impl->unsafe_storage().mutable_data();
-
-
-
-
-
 //   auto* pyobj_ptr = static_cast<std::shared_ptr<c10::SafePyObject>*>(data);
 //   PyObject* raw = pyobj_ptr->get()->ptr(getPyInterpreter());
 //   Py_INCREF(raw);  // Ensure lifetime is correct
 //   return py::reinterpret_borrow<py::object>(raw);
 // }
+
+struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
+  // NOTE: no idea what this is
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { return true; }
+};
+
+int register_hook() {
+  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
+  return 0;
+}
+int temp_register_hook = register_hook();
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);

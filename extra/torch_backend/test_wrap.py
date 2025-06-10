@@ -9,6 +9,7 @@ import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect
 torch.autograd.grad_mode.set_multithreading_enabled(False)
+# torch._dynamo.config.suppress_errors = True
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
