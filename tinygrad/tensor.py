@@ -185,7 +185,7 @@ class Tensor(MathTrait):
   
   # helpers for MathTrait
   def const_like(self, b:ConstType) -> Tensor: return Tensor(dtypes.as_const(b, self.dtype), self.device, self.dtype, requires_grad=False)
-  
+
   def alu(self, arg:Ops, *src) -> Tensor:
     return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], arg, *u[1:]), src[0])
 
@@ -3564,6 +3564,27 @@ class Tensor(MathTrait):
 
     # broadcast
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
+  
+  # def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
+  #   """
+  #   Subtracts `x` from `self`.
+  #   Equivalent to `self - x`.
+  #   Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+  #   ```python exec="true" source="above" session="tensor" result="python"
+  #   Tensor.manual_seed(42)
+  #   t = Tensor.randn(4)
+  #   print(t.numpy())
+  #   ```
+  #   ```python exec="true" source="above" session="tensor" result="python"
+  #   print(t.sub(20).numpy())
+  #   ```
+  #   ```python exec="true" source="above" session="tensor" result="python"
+  #   print(t.sub(Tensor([[2.0], [3.5]])).numpy())
+  #   ```
+  #   """
+  #   a, b = self._broadcasted(x, reverse)
+  #   return a + (-b)
 
   def div(self, x:Tensor|ConstType, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """
