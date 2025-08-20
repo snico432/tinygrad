@@ -182,13 +182,12 @@ class Tensor(MathTrait):
   def _apply_broadcasted_uop(self, fxn:Callable, x:Tensor|ConstType, reverse=False) -> Tensor:
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
-
-  # _binop is used by MathTrait
-  def _binop(self, op, x, reverse):
-    lhs, rhs = self._broadcasted(x, reverse)
-    if op is Ops.SUB:
-      return lhs + (-rhs)
-    return lhs._apply_uop(lambda *u: UOp.alu(u[0], op, *u[1:]), rhs)
+  
+  # helpers for MathTrait
+  def const_like(self, b:ConstType) -> Tensor: return Tensor(dtypes.as_const(b, self.dtype), self.device, self.dtype, requires_grad=False)
+  
+  def alu(self, arg:Ops, *src) -> Tensor:
+    return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], arg, *u[1:]), src[0])
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
