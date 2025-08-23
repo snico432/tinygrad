@@ -129,9 +129,7 @@ class MathTrait:
       print(t.sub(Tensor([[2.0], [3.5]])).numpy())
       ```
       """
-    ux = self.ufix(x)
-    return ux.alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, -ux)
-  
+    return self._binop(Ops.SUB, x, reverse)
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()

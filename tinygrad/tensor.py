@@ -184,16 +184,18 @@ class Tensor(MathTrait):
     return lhs._apply_uop(fxn, rhs)
 
   def const_like(self, b:ConstType) -> Tensor:
-    x: Tensor = self
-    if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(b, int)):
-      b_dtype = x.dtype
+    a: Tensor = self
+    if isinstance(a.dtype, ImageDType) or dtypes.is_float(a.dtype) or (dtypes.is_int(a.dtype) and isinstance(b, int)):
+      b_dtype = a.dtype
     else:
       b_dtype = dtypes.from_py(b)
-
-    return Tensor(dtypes.as_const(b, b_dtype), x.device, b_dtype, requires_grad=False)
+    return Tensor(dtypes.as_const(b, b_dtype), a.device, b_dtype, requires_grad=False)
 
   def alu(self, arg:Ops, *src) -> Tensor:
-    return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], arg, *u[1:]), src[0])
+    a, b = self._broadcasted(src[0])
+    if arg is Ops.SUB:
+      return a + (-b)
+    return a._apply_uop(lambda *u: UOp.alu(u[0], arg, *u[1:]), b)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
