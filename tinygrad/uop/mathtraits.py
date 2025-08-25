@@ -128,8 +128,10 @@ class MathTrait:
       ```python exec="true" source="above" session="tensor" result="python"
       print(t.sub(Tensor([[2.0], [3.5]])).numpy())
       ```
-      """
-    return self._binop(Ops.SUB, x, reverse)
+    """
+    y = self.const_like(x)
+    return (y + (-self)) if reverse else (self + (-y))
+
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()

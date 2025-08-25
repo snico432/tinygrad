@@ -183,19 +183,21 @@ class Tensor(MathTrait):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
 
-  def const_like(self, b:ConstType) -> Tensor:
+  def const_like(self, b) -> Tensor:
     a: Tensor = self
-    if isinstance(a.dtype, ImageDType) or dtypes.is_float(a.dtype) or (dtypes.is_int(a.dtype) and isinstance(b, int)):
-      b_dtype = a.dtype
-    else:
-      b_dtype = dtypes.from_py(b)
-    return Tensor(dtypes.as_const(b, b_dtype), a.device, b_dtype, requires_grad=False)
+    if not isinstance(b, Tensor):
+      if isinstance(a.dtype, ImageDType) or dtypes.is_float(a.dtype) or (dtypes.is_int(a.dtype) and isinstance(b, int)):
+        b_dtype = a.dtype
+      else:
+        b_dtype = dtypes.from_py(b)
+      b = Tensor(dtypes.as_const(b, b_dtype), a.device, b_dtype, requires_grad=False)
+
+    #broadcast
+    out_shape=_broadcast_shape(a.shape, b.shape)
+    return b._broadcast_to(out_shape)
 
   def alu(self, arg:Ops, *src) -> Tensor:
-    a, b = self._broadcasted(src[0])
-    if arg is Ops.SUB:
-      return a + (-b)
-    return a._apply_uop(lambda *u: UOp.alu(u[0], arg, *u[1:]), b)
+    return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], arg, *u[1:]), src[0])
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
